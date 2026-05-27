@@ -1,0 +1,15 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.log
+
+## Secrets — never commit these
+.env
+.env.local
+*.env
+
+## Docker build artifacts
+docker-compose.override.yml

@@ -1,0 +1,9 @@
+services:
+  forexbot:
+    build: .
+    image: forextradebot:latest
+    env_file:
+      - .env
+    restart: "no"
+    # Pass number of cycles as command argument (default 5)
+    # command: ["10"]
