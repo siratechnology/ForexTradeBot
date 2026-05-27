@@ -6,7 +6,7 @@ public class MetaApiMarketDataService : IMarketDataService
 {
     private readonly MetaApiClient _api;
     private decimal _currentPrice;
-    private List<Candle> _cachedCandles = [];
+    private readonly List<Candle> _cachedCandles = [];
 
     public decimal CurrentPrice => _currentPrice;
 
@@ -17,15 +17,30 @@ public class MetaApiMarketDataService : IMarketDataService
 
     public async Task TickAsync()
     {
-        // Fetch live price
         var price = await _api.GetCurrentPriceAsync("XAUUSD");
-        var ask = price.TryGetProperty("ask", out var a) ? (decimal)a.GetDouble() : 0m;
-        var bid = price.TryGetProperty("bid", out var b) ? (decimal)b.GetDouble() : 0m;
-        _currentPrice = (ask + bid) / 2m;
+        var ask = price.TryGetProperty("ask", out var a) ? (decimal)a.GetDouble() : _currentPrice;
+        var bid = price.TryGetProperty("bid", out var b) ? (decimal)b.GetDouble() : _currentPrice;
+        var mid = (ask + bid) / 2m;
 
-        // Fetch last 100 hourly candles for indicator calculations
-        var raw = await _api.GetCandlesAsync("XAUUSD", "1h", 100);
-        _cachedCandles = raw.Select(ParseCandle).ToList();
+        // Build a synthetic candle from previous → current price
+        if (_currentPrice > 0)
+        {
+            var open  = _currentPrice;
+            var close = mid;
+            _cachedCandles.Add(new Candle(
+                DateTime.UtcNow,
+                open,
+                Math.Max(open, close),
+                Math.Min(open, close),
+                close,
+                100m
+            ));
+            // Keep last 200 candles
+            if (_cachedCandles.Count > 200)
+                _cachedCandles.RemoveAt(0);
+        }
+
+        _currentPrice = mid;
     }
 
     public List<Candle> GetHistory(string period, int count)
@@ -43,28 +58,19 @@ public class MetaApiMarketDataService : IMarketDataService
     public TechnicalIndicators CalculateIndicators()
     {
         var closes = _cachedCandles.Select(c => c.Close).ToList();
-        if (closes.Count < 20)
-            return new TechnicalIndicators(50, _currentPrice, _currentPrice, _currentPrice, _currentPrice, 0, "neutral");
+        if (closes.Count < 3)
+            return new TechnicalIndicators(50, _currentPrice, _currentPrice, _currentPrice, _currentPrice, 0, "neutral — accumulating data");
 
-        var rsi   = CalculateRSI(closes, 14);
-        var ma20  = closes.TakeLast(20).Average();
+        var rsi   = closes.Count >= 15 ? CalculateRSI(closes, 14) : 50m;
+        var ma20  = closes.Count >= 20 ? closes.TakeLast(20).Average() : closes.Average();
         var ma50  = closes.Count >= 50 ? closes.TakeLast(50).Average() : closes.Average();
-        var (bbUpper, bbLower) = CalculateBollinger(closes.TakeLast(20).ToList());
-        var atr   = CalculateATR(_cachedCandles.TakeLast(15).ToList(), 14);
+        var (bbU, bbL) = closes.Count >= 20
+            ? CalculateBollinger(closes.TakeLast(20).ToList())
+            : (_currentPrice * 1.005m, _currentPrice * 0.995m);
+        var atr   = _cachedCandles.Count >= 2 ? CalculateATR(_cachedCandles.TakeLast(15).ToList(), Math.Min(14, _cachedCandles.Count - 1)) : 0m;
         var trend = ma20 > ma50 ? "bullish" : ma20 < ma50 ? "bearish" : "neutral";
 
-        return new TechnicalIndicators(rsi, ma20, ma50, bbUpper, bbLower, atr, trend);
-    }
-
-    private static Candle ParseCandle(System.Text.Json.JsonElement c)
-    {
-        var time   = DateTime.Parse(c.GetProperty("time").GetString()!);
-        var open   = (decimal)c.GetProperty("open").GetDouble();
-        var high   = (decimal)c.GetProperty("high").GetDouble();
-        var low    = (decimal)c.GetProperty("low").GetDouble();
-        var close  = (decimal)c.GetProperty("close").GetDouble();
-        var volume = c.TryGetProperty("tickVolume", out var v) ? (decimal)v.GetDouble() : 100m;
-        return new Candle(time, open, high, low, close, volume);
+        return new TechnicalIndicators(rsi, ma20, ma50, bbU, bbL, atr, trend);
     }
 
     private static int PeriodSize(string period) => period switch { "4h" => 4, "1d" => 24, _ => 1 };

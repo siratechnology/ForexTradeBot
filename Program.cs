@@ -37,9 +37,6 @@ if (isLiveMode)
     var engine = new MetaApiTradingEngine(metaApi);
     var bot    = new GoldTradingBot(anthropicClient, market, engine);
 
-    // Prime the market data cache before trading
-    await market.TickAsync();
-
     for (int i = 1; i <= cycles; i++)
     {
         await bot.AnalyzeAndTradeAsync(i);
