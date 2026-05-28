@@ -8,7 +8,6 @@ public class MetaApiMarketDataService : IMarketDataService
     private readonly MetaApiClient _api;
     private decimal _currentPrice;
 
-    // Separate history per timeframe — seeded from MetaAPI on init, then appended live
     private readonly List<Candle> _history1h = [];
     private readonly List<Candle> _history4h = [];
     private readonly List<Candle> _history1d = [];
@@ -22,11 +21,48 @@ public class MetaApiMarketDataService : IMarketDataService
 
     public async Task InitializeAsync()
     {
-        Console.WriteLine("  Loading historical candles from MetaAPI...");
-        _history1h.AddRange((await _api.GetCandlesAsync("XAUUSD", "1h", 200)).Select(ParseCandle));
-        _history4h.AddRange((await _api.GetCandlesAsync("XAUUSD", "4h", 100)).Select(ParseCandle));
-        _history1d.AddRange((await _api.GetCandlesAsync("XAUUSD", "1d",  50)).Select(ParseCandle));
-        Console.WriteLine($"  Seeded: {_history1h.Count}×1h, {_history4h.Count}×4h, {_history1d.Count}×1d candles");
+        Console.WriteLine("  Loading historical candles...");
+        try
+        {
+            _history1h.AddRange((await _api.GetCandlesAsync("XAUUSD", "1h", 200)).Select(ParseMetaCandle));
+            _history4h.AddRange((await _api.GetCandlesAsync("XAUUSD", "4h", 100)).Select(ParseMetaCandle));
+            _history1d.AddRange((await _api.GetCandlesAsync("XAUUSD", "1d",  50)).Select(ParseMetaCandle));
+            Console.WriteLine($"  MetaAPI seeded: {_history1h.Count}×1h, {_history4h.Count}×4h, {_history1d.Count}×1d candles");
+        }
+        catch
+        {
+            Console.WriteLine("  MetaAPI historical data unavailable — falling back to Yahoo Finance...");
+            await LoadFromYahooAsync();
+        }
+    }
+
+    private async Task LoadFromYahooAsync()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0");
+
+        try
+        {
+            // ~1 month of hourly bars (Gold Futures GC=F — price tracks spot XAUUSD closely)
+            var raw1h = await http.GetStringAsync(
+                "https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1h&range=1mo");
+            _history1h.AddRange(ParseYahooCandles(raw1h).TakeLast(200));
+
+            // 3 months of daily bars
+            var raw1d = await http.GetStringAsync(
+                "https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=3mo");
+            _history1d.AddRange(ParseYahooCandles(raw1d).TakeLast(50));
+
+            // 4h: downsample from 1h groups
+            _history4h.AddRange(Downsample(_history1h, 4).TakeLast(100));
+
+            Console.WriteLine($"  Yahoo Finance seeded: {_history1h.Count}×1h, {_history4h.Count}×4h, {_history1d.Count}×1d candles");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  Yahoo Finance fallback failed: {ex.Message}");
+            Console.WriteLine("  Bot will warm up from live ticks — indicators active after ~50 cycles (~4h)");
+        }
     }
 
     public async Task TickAsync()
@@ -78,7 +114,7 @@ public class MetaApiMarketDataService : IMarketDataService
         return new TechnicalIndicators(rsi, ma20, ma50, bbU, bbL, atr, trend);
     }
 
-    private static Candle ParseCandle(JsonElement el)
+    private static Candle ParseMetaCandle(JsonElement el)
     {
         var time  = el.TryGetProperty("time",       out var t) ? DateTime.Parse(t.GetString()!, null, System.Globalization.DateTimeStyles.RoundtripKind) : DateTime.UtcNow;
         var open  = el.TryGetProperty("open",       out var o) ? (decimal)o.GetDouble() : 0m;
@@ -87,6 +123,45 @@ public class MetaApiMarketDataService : IMarketDataService
         var close = el.TryGetProperty("close",      out var c) ? (decimal)c.GetDouble() : 0m;
         var vol   = el.TryGetProperty("tickVolume", out var v) ? (decimal)v.GetDouble() : 0m;
         return new Candle(time, open, high, low, close, vol);
+    }
+
+    private static List<Candle> ParseYahooCandles(string json)
+    {
+        using var doc    = JsonDocument.Parse(json);
+        var result       = doc.RootElement.GetProperty("chart").GetProperty("result")[0];
+        var timestamps   = result.GetProperty("timestamp").EnumerateArray().ToList();
+        var quote        = result.GetProperty("indicators").GetProperty("quote")[0];
+        var opens        = quote.GetProperty("open").EnumerateArray().ToList();
+        var highs        = quote.GetProperty("high").EnumerateArray().ToList();
+        var lows         = quote.GetProperty("low").EnumerateArray().ToList();
+        var closes       = quote.GetProperty("close").EnumerateArray().ToList();
+        var volumes      = quote.GetProperty("volume").EnumerateArray().ToList();
+
+        var candles = new List<Candle>();
+        for (int i = 0; i < timestamps.Count; i++)
+        {
+            if (i >= closes.Count || closes[i].ValueKind == JsonValueKind.Null) continue;
+            candles.Add(new Candle(
+                DateTimeOffset.FromUnixTimeSeconds(timestamps[i].GetInt64()).UtcDateTime,
+                i < opens.Count   && opens[i].ValueKind   != JsonValueKind.Null ? (decimal)opens[i].GetDouble()   : 0m,
+                i < highs.Count   && highs[i].ValueKind   != JsonValueKind.Null ? (decimal)highs[i].GetDouble()   : 0m,
+                i < lows.Count    && lows[i].ValueKind    != JsonValueKind.Null ? (decimal)lows[i].GetDouble()    : 0m,
+                (decimal)closes[i].GetDouble(),
+                i < volumes.Count && volumes[i].ValueKind != JsonValueKind.Null ? (decimal)volumes[i].GetDouble() : 0m
+            ));
+        }
+        return candles;
+    }
+
+    private static List<Candle> Downsample(List<Candle> candles, int size)
+    {
+        var result = new List<Candle>();
+        for (int i = 0; i + size <= candles.Count; i += size)
+        {
+            var g = candles.Skip(i).Take(size).ToList();
+            result.Add(new Candle(g[0].Timestamp, g[0].Open, g.Max(x => x.High), g.Min(x => x.Low), g[^1].Close, g.Sum(x => x.Volume)));
+        }
+        return result;
     }
 
     private static decimal CalculateRSI(List<decimal> closes, int period)
