@@ -13,4 +13,6 @@ public interface ITradingEngine
     Task<string> BuyAsync(decimal price, decimal lots, string reason);
     Task<string> SellAsync(decimal price, decimal lots, string reason);
     Task<string> GetPortfolioStatusAsync(decimal currentPrice);
+    Task<(decimal floatPnL, bool hasPosition)> GetPositionStatusAsync(decimal currentPrice);
+    Task<string> CloseAllAsync(string reason);
 }

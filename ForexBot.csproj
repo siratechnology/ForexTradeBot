@@ -6,7 +6,4 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ForexBot</RootNamespace>
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Anthropic" Version="12.*" />
-  </ItemGroup>
 </Project>

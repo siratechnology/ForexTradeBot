@@ -77,6 +77,38 @@ public class MetaApiTradingEngine : ITradingEngine
         return $"SELL FAILED ({sellCode}): {sellMsg}";
     }
 
+    public async Task<(decimal floatPnL, bool hasPosition)> GetPositionStatusAsync(decimal currentPrice)
+    {
+        var positions = await _api.GetPositionsAsync();
+        var xau = positions.Where(p =>
+            p.TryGetProperty("symbol", out var s) && s.GetString() == Symbol).ToList();
+        var pnl = xau.Sum(p => p.TryGetProperty("profit", out var pr) ? pr.GetDecimal() : 0m);
+        return (pnl, xau.Count > 0);
+    }
+
+    public async Task<string> CloseAllAsync(string reason)
+    {
+        var positions = await _api.GetPositionsAsync();
+        var xau = positions.Where(p =>
+            p.TryGetProperty("symbol", out var s) && s.GetString() == Symbol).ToList();
+        if (xau.Count == 0) return "No positions to close.";
+
+        var results = new List<string>();
+        foreach (var pos in xau)
+        {
+            var posId = pos.GetProperty("id").GetString();
+            var r     = await _api.PlaceTradeAsync(new
+            {
+                actionType = "POSITION_CLOSE_ID",
+                positionId = posId,
+                comment    = reason[..Math.Min(reason.Length, 31)],
+            });
+            var code = r.TryGetProperty("stringCode", out var sc) ? sc.GetString() : "UNKNOWN";
+            results.Add($"{posId}: {code}");
+        }
+        return $"CLOSED {xau.Count} position(s) — {string.Join(", ", results)}";
+    }
+
     public async Task<string> GetPortfolioStatusAsync(decimal currentPrice)
     {
         var info = await _api.GetAccountInfoAsync();

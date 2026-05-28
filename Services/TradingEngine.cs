@@ -5,8 +5,8 @@ namespace ForexBot.Services;
 public class TradingEngine : ITradingEngine
 {
     private readonly Portfolio _portfolio = new();
+    private decimal _lastKnownPrice;
 
-    // 1 lot XAUUSD = 100 oz (standard MT5 convention)
     private const decimal OzPerLot = 100m;
 
     public Task<string> BuyAsync(decimal price, decimal lots, string reason)
@@ -25,8 +25,9 @@ public class TradingEngine : ITradingEngine
             cost = price * oz;
         }
 
-        _portfolio.CashBalance -= cost;
-        _portfolio.GoldHolding += oz;
+        _portfolio.CashBalance   -= cost;
+        _portfolio.GoldHolding   += oz;
+        _portfolio.GoldEntryValue += cost;
         _portfolio.Trades.Add(new Trade(Guid.NewGuid(), TradeType.Buy, price, oz, DateTime.UtcNow, reason));
 
         return Task.FromResult(
@@ -45,6 +46,9 @@ public class TradingEngine : ITradingEngine
             return Task.FromResult("REJECTED: No gold holdings to sell.");
 
         var proceeds = price * oz;
+        // Reduce cost basis proportionally
+        if (_portfolio.GoldHolding > 0)
+            _portfolio.GoldEntryValue -= _portfolio.GoldEntryValue * (oz / _portfolio.GoldHolding);
         _portfolio.GoldHolding -= oz;
         _portfolio.CashBalance += proceeds;
         _portfolio.Trades.Add(new Trade(Guid.NewGuid(), TradeType.Sell, price, oz, DateTime.UtcNow, reason));
@@ -70,6 +74,20 @@ public class TradingEngine : ITradingEngine
             Current Price: ${currentPrice:F2}/oz
             ================================
             """);
+    }
+
+    public Task<(decimal floatPnL, bool hasPosition)> GetPositionStatusAsync(decimal currentPrice)
+    {
+        _lastKnownPrice = currentPrice;
+        var hasPos  = _portfolio.GoldHolding > 0;
+        var pnl     = hasPos ? _portfolio.GoldHolding * currentPrice - _portfolio.GoldEntryValue : 0m;
+        return Task.FromResult((pnl, hasPos));
+    }
+
+    public Task<string> CloseAllAsync(string reason)
+    {
+        if (_portfolio.GoldHolding <= 0) return Task.FromResult("No position to close.");
+        return SellAsync(_lastKnownPrice, _portfolio.GoldHolding / OzPerLot, reason);
     }
 
     public Portfolio Portfolio => _portfolio;
