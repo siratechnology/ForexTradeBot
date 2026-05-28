@@ -152,7 +152,7 @@ public class GoldTradingBot
         sb.AppendLine($"XAUUSD {period} — last {candles.Count} candles:");
         sb.AppendLine($"  {"Timestamp",-20} {"Open",8} {"High",8} {"Low",8} {"Close",8}");
         foreach (var c2 in candles.TakeLast(10))
-            sb.AppendLine($"  {c2.Timestamp:yyyy-MM-dd HH:mm,-20} {c2.Open,8:F2} {c2.High,8:F2} {c2.Low,8:F2} {c2.Close,8:F2}");
+            sb.AppendLine($"  {c2.Timestamp.ToString("yyyy-MM-dd HH:mm"),-20} {c2.Open,8:F2} {c2.High,8:F2} {c2.Low,8:F2} {c2.Close,8:F2}");
         return sb.ToString();
     }
 

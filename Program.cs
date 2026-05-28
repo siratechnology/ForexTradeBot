@@ -9,7 +9,8 @@ if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_
     Environment.Exit(1);
 }
 
-int cycles = args.Length > 0 && int.TryParse(args[0], out var n) ? n : 5;
+int cycles          = args.Length > 0 && int.TryParse(args[0], out var n) ? n : int.MaxValue;
+int intervalSeconds = args.Length > 1 && int.TryParse(args[1], out var s) ? s : 300;
 
 // ── Detect mode ────────────────────────────────────────────────────────────
 var metaToken     = Environment.GetEnvironmentVariable("META_API_TOKEN");
@@ -20,7 +21,8 @@ bool isLiveMode = !string.IsNullOrWhiteSpace(metaToken) && !string.IsNullOrWhite
 Console.WriteLine("=== XAUUSD Gold Trading Bot ===");
 Console.WriteLine($"Model  : claude-opus-4-7");
 Console.WriteLine($"Mode   : {(isLiveMode ? "LIVE — MetaAPI + MT5" : "Paper Trading (Simulation)")}");
-Console.WriteLine($"Cycles : {cycles}");
+Console.WriteLine($"Cycles  : {(cycles == int.MaxValue ? "∞ (run forever)" : cycles.ToString())}");
+Console.WriteLine($"Interval: {intervalSeconds}s");
 Console.WriteLine("================================\n");
 
 var anthropicClient = new AnthropicClient();
@@ -34,13 +36,14 @@ if (isLiveMode)
     await metaApi.WaitForDeployedAsync();
 
     var market = new MetaApiMarketDataService(metaApi);
+    await market.InitializeAsync();
     var engine = new MetaApiTradingEngine(metaApi);
     var bot    = new GoldTradingBot(anthropicClient, market, engine);
 
     for (int i = 1; i <= cycles; i++)
     {
         await bot.AnalyzeAndTradeAsync(i);
-        if (i < cycles) await Task.Delay(3000);
+        if (i < cycles) await Task.Delay(TimeSpan.FromSeconds(intervalSeconds));
     }
 
     Console.WriteLine();

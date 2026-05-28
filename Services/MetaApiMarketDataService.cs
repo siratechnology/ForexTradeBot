@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ForexBot.Models;
 
 namespace ForexBot.Services;
@@ -6,13 +7,26 @@ public class MetaApiMarketDataService : IMarketDataService
 {
     private readonly MetaApiClient _api;
     private decimal _currentPrice;
-    private readonly List<Candle> _cachedCandles = [];
+
+    // Separate history per timeframe — seeded from MetaAPI on init, then appended live
+    private readonly List<Candle> _history1h = [];
+    private readonly List<Candle> _history4h = [];
+    private readonly List<Candle> _history1d = [];
 
     public decimal CurrentPrice => _currentPrice;
 
     public MetaApiMarketDataService(MetaApiClient api)
     {
         _api = api;
+    }
+
+    public async Task InitializeAsync()
+    {
+        Console.WriteLine("  Loading historical candles from MetaAPI...");
+        _history1h.AddRange((await _api.GetCandlesAsync("XAUUSD", "1h", 200)).Select(ParseCandle));
+        _history4h.AddRange((await _api.GetCandlesAsync("XAUUSD", "4h", 100)).Select(ParseCandle));
+        _history1d.AddRange((await _api.GetCandlesAsync("XAUUSD", "1d",  50)).Select(ParseCandle));
+        Console.WriteLine($"  Seeded: {_history1h.Count}×1h, {_history4h.Count}×4h, {_history1d.Count}×1d candles");
     }
 
     public async Task TickAsync()
@@ -22,22 +36,12 @@ public class MetaApiMarketDataService : IMarketDataService
         var bid = price.TryGetProperty("bid", out var b) ? (decimal)b.GetDouble() : _currentPrice;
         var mid = (ask + bid) / 2m;
 
-        // Build a synthetic candle from previous → current price
         if (_currentPrice > 0)
         {
             var open  = _currentPrice;
             var close = mid;
-            _cachedCandles.Add(new Candle(
-                DateTime.UtcNow,
-                open,
-                Math.Max(open, close),
-                Math.Min(open, close),
-                close,
-                100m
-            ));
-            // Keep last 200 candles
-            if (_cachedCandles.Count > 200)
-                _cachedCandles.RemoveAt(0);
+            _history1h.Add(new Candle(DateTime.UtcNow, open, Math.Max(open, close), Math.Min(open, close), close, 100m));
+            if (_history1h.Count > 500) _history1h.RemoveAt(0);
         }
 
         _currentPrice = mid;
@@ -45,45 +49,44 @@ public class MetaApiMarketDataService : IMarketDataService
 
     public List<Candle> GetHistory(string period, int count)
     {
-        if (_cachedCandles.Count == 0) return [];
         count = Math.Clamp(count, 1, 50);
-
-        if (period == "1h")
-            return _cachedCandles.TakeLast(count).ToList();
-
-        var grouped = Downsample(_cachedCandles, PeriodSize(period));
-        return grouped.TakeLast(count).ToList();
+        return period switch
+        {
+            "4h" => _history4h.TakeLast(count).ToList(),
+            "1d" => _history1d.TakeLast(count).ToList(),
+            _    => _history1h.TakeLast(count).ToList(),
+        };
     }
 
     public TechnicalIndicators CalculateIndicators()
     {
-        var closes = _cachedCandles.Select(c => c.Close).ToList();
+        var closes = _history1h.Select(c => c.Close).ToList();
         if (closes.Count < 3)
             return new TechnicalIndicators(50, _currentPrice, _currentPrice, _currentPrice, _currentPrice, 0, "neutral — accumulating data");
 
-        var rsi   = closes.Count >= 15 ? CalculateRSI(closes, 14) : 50m;
-        var ma20  = closes.Count >= 20 ? closes.TakeLast(20).Average() : closes.Average();
-        var ma50  = closes.Count >= 50 ? closes.TakeLast(50).Average() : closes.Average();
+        var rsi        = closes.Count >= 15 ? CalculateRSI(closes, 14) : 50m;
+        var ma20       = closes.Count >= 20 ? closes.TakeLast(20).Average() : closes.Average();
+        var ma50       = closes.Count >= 50 ? closes.TakeLast(50).Average() : closes.Average();
         var (bbU, bbL) = closes.Count >= 20
             ? CalculateBollinger(closes.TakeLast(20).ToList())
             : (_currentPrice * 1.005m, _currentPrice * 0.995m);
-        var atr   = _cachedCandles.Count >= 2 ? CalculateATR(_cachedCandles.TakeLast(15).ToList(), Math.Min(14, _cachedCandles.Count - 1)) : 0m;
-        var trend = ma20 > ma50 ? "bullish" : ma20 < ma50 ? "bearish" : "neutral";
+        var atr        = _history1h.Count >= 2
+            ? CalculateATR(_history1h.TakeLast(15).ToList(), Math.Min(14, _history1h.Count - 1))
+            : 0m;
+        var trend      = ma20 > ma50 ? "bullish" : ma20 < ma50 ? "bearish" : "neutral";
 
         return new TechnicalIndicators(rsi, ma20, ma50, bbU, bbL, atr, trend);
     }
 
-    private static int PeriodSize(string period) => period switch { "4h" => 4, "1d" => 24, _ => 1 };
-
-    private static List<Candle> Downsample(List<Candle> candles, int size)
+    private static Candle ParseCandle(JsonElement el)
     {
-        var result = new List<Candle>();
-        for (int i = 0; i + size <= candles.Count; i += size)
-        {
-            var g = candles.Skip(i).Take(size).ToList();
-            result.Add(new Candle(g[0].Timestamp, g[0].Open, g.Max(x => x.High), g.Min(x => x.Low), g[^1].Close, g.Sum(x => x.Volume)));
-        }
-        return result;
+        var time  = el.TryGetProperty("time",       out var t) ? DateTime.Parse(t.GetString()!, null, System.Globalization.DateTimeStyles.RoundtripKind) : DateTime.UtcNow;
+        var open  = el.TryGetProperty("open",       out var o) ? (decimal)o.GetDouble() : 0m;
+        var high  = el.TryGetProperty("high",       out var h) ? (decimal)h.GetDouble() : 0m;
+        var low   = el.TryGetProperty("low",        out var l) ? (decimal)l.GetDouble() : 0m;
+        var close = el.TryGetProperty("close",      out var c) ? (decimal)c.GetDouble() : 0m;
+        var vol   = el.TryGetProperty("tickVolume", out var v) ? (decimal)v.GetDouble() : 0m;
+        return new Candle(time, open, high, low, close, vol);
     }
 
     private static decimal CalculateRSI(List<decimal> closes, int period)
