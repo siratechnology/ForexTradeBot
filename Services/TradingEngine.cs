@@ -90,5 +90,18 @@ public class TradingEngine : ITradingEngine
         return SellAsync(_lastKnownPrice, _portfolio.GoldHolding / OzPerLot, reason);
     }
 
+    public Task<List<OpenPosition>> GetOpenPositionsAsync()
+    {
+        if (_portfolio.GoldHolding <= 0)
+            return Task.FromResult(new List<OpenPosition>());
+        var lots    = _portfolio.GoldHolding / OzPerLot;
+        var avg     = _portfolio.GoldEntryValue / _portfolio.GoldHolding;
+        var pnl     = _portfolio.GoldHolding * _lastKnownPrice - _portfolio.GoldEntryValue;
+        return Task.FromResult(new List<OpenPosition>
+        {
+            new OpenPosition("paper-1", "BUY", lots, avg, pnl)
+        });
+    }
+
     public Portfolio Portfolio => _portfolio;
 }

@@ -109,6 +109,23 @@ public class MetaApiTradingEngine : ITradingEngine
         return $"CLOSED {xau.Count} position(s) — {string.Join(", ", results)}";
     }
 
+    public async Task<List<OpenPosition>> GetOpenPositionsAsync()
+    {
+        var positions = await _api.GetPositionsAsync();
+        return positions
+            .Where(p => p.TryGetProperty("symbol", out var s) && s.GetString() == Symbol)
+            .Select(p =>
+            {
+                var id    = p.TryGetProperty("id",        out var idP) ? idP.GetString() ?? ""   : "";
+                var type  = p.TryGetProperty("type",      out var t)   ? (t.GetString() == "POSITION_TYPE_BUY" ? "BUY" : "SELL") : "?";
+                var lots  = p.TryGetProperty("volume",    out var v)   ? v.GetDecimal()           : 0m;
+                var open  = p.TryGetProperty("openPrice", out var op)  ? op.GetDecimal()          : 0m;
+                var pnl   = p.TryGetProperty("profit",    out var pr)  ? pr.GetDecimal()          : 0m;
+                return new OpenPosition(id, type, lots, open, pnl);
+            })
+            .ToList();
+    }
+
     public async Task<string> GetPortfolioStatusAsync(decimal currentPrice)
     {
         var info = await _api.GetAccountInfoAsync();
