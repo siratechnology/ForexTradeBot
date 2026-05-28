@@ -4,6 +4,6 @@ services:
     image: forextradebot:latest
     env_file:
       - .env
+    ports:
+      - "5050:5050"
     restart: unless-stopped
-    # args: [cycles, interval_seconds] — defaults: ∞ cycles, 300s (5 min) interval
-    # command: ["100", "60"]   # 100 cycles every 60 seconds
