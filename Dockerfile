@@ -8,15 +8,12 @@ RUN dotnet restore
 COPY . .
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
-# Stage 2: Runtime (linux/amd64)
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
+# Stage 2: Runtime — aspnet image required for ASP.NET Core Web API
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish .
 
-# Environment variables — pass at runtime via docker run -e or --env-file
-ENV ANTHROPIC_API_KEY=""
-ENV META_API_TOKEN=""
-ENV META_ACCOUNT_ID=""
+# Env vars are injected at runtime via .env file (see docker-compose.yml)
 
 ENTRYPOINT ["dotnet", "ForexBot.dll"]
