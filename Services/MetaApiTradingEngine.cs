@@ -12,70 +12,50 @@ public class MetaApiTradingEngine : ITradingEngine
         _api = api;
     }
 
-    public async Task<string> BuyAsync(decimal price, decimal lots, string reason)
+    // Opens an independent position. Buy and sell coexist — neither closes the other.
+    // NOTE: simultaneous opposite positions require a HEDGING MT5 account; a netting
+    // account will still merge them at the broker (an account-type setting, not code).
+    public async Task<string> OpenAsync(TradeType side, decimal price, decimal lots, string reason)
     {
         lots = Math.Max(0.01m, Math.Round(lots, 2));
+        var actionType = side == TradeType.Buy ? "ORDER_TYPE_BUY" : "ORDER_TYPE_SELL";
+        var label      = side == TradeType.Buy ? "BUY" : "SELL";
 
         var result = await _api.PlaceTradeAsync(new
         {
-            actionType = "ORDER_TYPE_BUY",
-            symbol     = Symbol,
-            volume     = (double)lots,
-            comment    = reason[..Math.Min(reason.Length, 31)],
+            actionType,
+            symbol  = Symbol,
+            volume  = (double)lots,
+            comment = reason[..Math.Min(reason.Length, 31)],
         });
 
         var code = result.TryGetProperty("stringCode", out var sc) ? sc.GetString() : "UNKNOWN";
         if (code == "TRADE_RETCODE_DONE")
-            return $"BUY FILLED: {lots} lot(s) XAUUSD @ ~${price:F2} | Reason: {reason}";
+            return $"{label} FILLED: {lots} lot(s) XAUUSD @ ~${price:F2} | Reason: {reason}";
 
         var msg = result.TryGetProperty("message", out var m) ? m.GetString() : result.ToString();
-        return $"BUY FAILED ({code}): {msg}";
+        return $"{label} FAILED ({code}): {msg}";
     }
 
-    public async Task<string> SellAsync(decimal price, decimal lots, string reason)
+    public async Task<string> ClosePositionAsync(string positionId, string reason)
     {
-        // Close all open buy positions first
-        var positions = await _api.GetPositionsAsync();
-        var buyPositions = positions
-            .Where(p => p.TryGetProperty("type", out var t) && t.GetString() == "POSITION_TYPE_BUY"
-                     && p.TryGetProperty("symbol", out var s) && s.GetString() == Symbol)
-            .ToList();
-
-        if (buyPositions.Count > 0)
+        var result = await _api.PlaceTradeAsync(new
         {
-            var results = new List<string>();
-            foreach (var pos in buyPositions)
-            {
-                var posId = pos.GetProperty("id").GetString();
-                var closeResult = await _api.PlaceTradeAsync(new
-                {
-                    actionType = "POSITION_CLOSE_ID",
-                    positionId = posId,
-                    comment    = reason[..Math.Min(reason.Length, 31)],
-                });
-                var code = closeResult.TryGetProperty("stringCode", out var sc) ? sc.GetString() : "UNKNOWN";
-                results.Add($"Position {posId}: {code}");
-            }
-            return $"CLOSED {buyPositions.Count} buy position(s) | {string.Join(", ", results)}";
-        }
-
-        // If no buy positions, open a sell position
-        lots = Math.Max(0.01m, Math.Round(lots, 2));
-        var sellResult = await _api.PlaceTradeAsync(new
-        {
-            actionType = "ORDER_TYPE_SELL",
-            symbol     = Symbol,
-            volume     = (double)lots,
+            actionType = "POSITION_CLOSE_ID",
+            positionId,
             comment    = reason[..Math.Min(reason.Length, 31)],
         });
+        var code = result.TryGetProperty("stringCode", out var sc) ? sc.GetString() : "UNKNOWN";
+        if (code == "TRADE_RETCODE_DONE")
+            return $"CLOSED position {positionId} | {reason}";
 
-        var sellCode = sellResult.TryGetProperty("stringCode", out var sellSc) ? sellSc.GetString() : "UNKNOWN";
-        if (sellCode == "TRADE_RETCODE_DONE")
-            return $"SELL FILLED: {lots} lot(s) XAUUSD @ ~${price:F2} | Reason: {reason}";
-
-        var sellMsg = sellResult.TryGetProperty("message", out var sellM) ? sellM.GetString() : sellResult.ToString();
-        return $"SELL FAILED ({sellCode}): {sellMsg}";
+        var msg = result.TryGetProperty("message", out var m) ? m.GetString() : result.ToString();
+        return $"CLOSE FAILED ({code}) for {positionId}: {msg}";
     }
+
+    // Manual API buy/sell open independent positions (no netting), same as the bot.
+    public Task<string> BuyAsync(decimal price, decimal lots, string reason)  => OpenAsync(TradeType.Buy,  price, lots, reason);
+    public Task<string> SellAsync(decimal price, decimal lots, string reason) => OpenAsync(TradeType.Sell, price, lots, reason);
 
     public async Task<(decimal floatPnL, bool hasPosition)> GetPositionStatusAsync(decimal currentPrice)
     {

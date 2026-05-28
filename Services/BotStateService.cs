@@ -8,6 +8,14 @@ public class BotSettings
     public int MaxTradesPerDay { get; set; } = 0;      // 0 = unlimited
     public string? TradingStartUtc { get; set; }       // "HH:mm" or null = 24h
     public string? TradingEndUtc { get; set; }
+
+    // ── Multi-position scalper tuning ───────────────────────────────────────────
+    public int MaxOpenPositions { get; set; } = 10;    // max positions held at once
+    public int OpenPerCycle { get; set; } = 1;         // new positions opened per cycle (scale-in rate)
+    public decimal MinProfitToLock { get; set; } = 1.5m; // $ profit before trailing exit arms
+    public decimal TrailGiveback { get; set; } = 0.4m;   // close when profit retraces this fraction of its peak
+    public decimal MaxLossPerTrade { get; set; } = 3.0m; // hard $ stop per position
+    public int CycleSeconds { get; set; } = 5;           // loop interval (rate at which positions open)
 }
 
 public class BotStateService

@@ -27,10 +27,16 @@ public class AccountRegistry : IHostedService
                 foreach (var p in saved)
                 {
                     var entry = BuildEntry(p.ApiKey, p.Label, p.MetaToken, p.MetaAccountId, p.RegisteredAt);
-                    entry.State.Settings.LotSize         = p.LotSize;
-                    entry.State.Settings.MaxTradesPerDay = p.MaxTradesPerDay;
-                    entry.State.Settings.TradingStartUtc = p.TradingStartUtc;
-                    entry.State.Settings.TradingEndUtc   = p.TradingEndUtc;
+                    entry.State.Settings.LotSize          = p.LotSize;
+                    entry.State.Settings.MaxTradesPerDay  = p.MaxTradesPerDay;
+                    entry.State.Settings.TradingStartUtc  = p.TradingStartUtc;
+                    entry.State.Settings.TradingEndUtc    = p.TradingEndUtc;
+                    entry.State.Settings.MaxOpenPositions = p.MaxOpenPositions;
+                    entry.State.Settings.OpenPerCycle     = p.OpenPerCycle;
+                    entry.State.Settings.MinProfitToLock  = p.MinProfitToLock;
+                    entry.State.Settings.TrailGiveback    = p.TrailGiveback;
+                    entry.State.Settings.MaxLossPerTrade  = p.MaxLossPerTrade;
+                    entry.State.Settings.CycleSeconds     = p.CycleSeconds;
                     _accounts[entry.ApiKey] = entry;
                     StartBotTask(entry);
                 }
@@ -155,6 +161,12 @@ public class AccountRegistry : IHostedService
                 MaxTradesPerDay  = a.State.Settings.MaxTradesPerDay,
                 TradingStartUtc  = a.State.Settings.TradingStartUtc,
                 TradingEndUtc    = a.State.Settings.TradingEndUtc,
+                MaxOpenPositions = a.State.Settings.MaxOpenPositions,
+                OpenPerCycle     = a.State.Settings.OpenPerCycle,
+                MinProfitToLock  = a.State.Settings.MinProfitToLock,
+                TrailGiveback    = a.State.Settings.TrailGiveback,
+                MaxLossPerTrade  = a.State.Settings.MaxLossPerTrade,
+                CycleSeconds     = a.State.Settings.CycleSeconds,
             }).ToList();
         }
         await File.WriteAllTextAsync(_dataFile, JsonSerializer.Serialize(list, JsonOpts));

@@ -10,6 +10,11 @@ public interface IMarketDataService
 
 public interface ITradingEngine
 {
+    // Opens an independent position. A buy and a sell can coexist — neither nets the other.
+    Task<string> OpenAsync(TradeType side, decimal price, decimal lots, string reason);
+    // Closes a single position by its id (locks in its own profit/loss).
+    Task<string> ClosePositionAsync(string positionId, string reason);
+
     Task<string> BuyAsync(decimal price, decimal lots, string reason);
     Task<string> SellAsync(decimal price, decimal lots, string reason);
     Task<string> GetPortfolioStatusAsync(decimal currentPrice);

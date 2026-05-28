@@ -17,7 +17,7 @@ public class TradeController : AccountController
         if (account.State.Engine == null) return StatusCode(503, new { error = "Bot not initialized yet" });
         if (req.Lots < 0.01m) return BadRequest(new { error = "Minimum lot size is 0.01" });
 
-        var result = await account.State.Engine.BuyAsync(account.State.CurrentPrice, req.Lots, "Manual BUY via API");
+        var result = await account.State.Engine.OpenAsync(TradeType.Buy, account.State.CurrentPrice, req.Lots, "Manual BUY via API");
         account.State.AddTrade(new TradeRecord(DateTime.UtcNow, "BUY", req.Lots, account.State.CurrentPrice, "Manual via API"));
         account.State.LastAction = $"Manual BUY {req.Lots} lot @ ${account.State.CurrentPrice:F2}";
         return Ok(new { result, price = account.State.CurrentPrice });
@@ -31,7 +31,7 @@ public class TradeController : AccountController
         if (account.State.Engine == null) return StatusCode(503, new { error = "Bot not initialized yet" });
         if (req.Lots < 0.01m) return BadRequest(new { error = "Minimum lot size is 0.01" });
 
-        var result = await account.State.Engine.SellAsync(account.State.CurrentPrice, req.Lots, "Manual SELL via API");
+        var result = await account.State.Engine.OpenAsync(TradeType.Sell, account.State.CurrentPrice, req.Lots, "Manual SELL via API");
         account.State.AddTrade(new TradeRecord(DateTime.UtcNow, "SELL", req.Lots, account.State.CurrentPrice, "Manual via API"));
         account.State.LastAction = $"Manual SELL {req.Lots} lot @ ${account.State.CurrentPrice:F2}";
         return Ok(new { result, price = account.State.CurrentPrice });

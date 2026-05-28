@@ -29,6 +29,14 @@ public class PersistedAccount
     public int     MaxTradesPerDay   { get; set; } = 0;
     public string? TradingStartUtc   { get; set; }
     public string? TradingEndUtc     { get; set; }
+
+    // Multi-position scalper tuning
+    public int     MaxOpenPositions  { get; set; } = 10;
+    public int     OpenPerCycle      { get; set; } = 1;
+    public decimal MinProfitToLock   { get; set; } = 1.5m;
+    public decimal TrailGiveback     { get; set; } = 0.4m;
+    public decimal MaxLossPerTrade   { get; set; } = 3.0m;
+    public int     CycleSeconds      { get; set; } = 5;
 }
 
 public class RegisterRequest

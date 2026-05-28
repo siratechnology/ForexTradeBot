@@ -58,26 +58,31 @@ public class AccountBotRunner
                 {
                     _state.CheckDailyReset();
 
+                    await market.TickAsync();
+                    var price = market.CurrentPrice;
+                    _state.CurrentPrice = price;
+                    _state.LastCycle    = DateTime.UtcNow;
+
                     if (_state.CanTrade())
                     {
                         cycle++;
-                        await bot.RunCycleAsync(cycle);
+                        await bot.RunCycleAsync(cycle, price);
+                    }
+                    else if (_state.IsRunning)
+                    {
+                        // Paused by hours/daily-limit: keep trailing exits running, just open nothing new.
+                        await bot.ManageExitsAsync(price);
+                        _state.LastAction = _state.Settings.MaxTradesPerDay > 0 && _state.TradesToday >= _state.Settings.MaxTradesPerDay
+                            ? $"Daily limit reached ({_state.TradesToday}/{_state.Settings.MaxTradesPerDay}) — trailing exits"
+                            : "Outside trading hours — trailing exits";
                     }
                     else
                     {
-                        await market.TickAsync();
-                        _state.CurrentPrice = market.CurrentPrice;
-                        (decimal pnl, bool hasPos) = await engine.GetPositionStatusAsync(market.CurrentPrice);
-                        _state.FloatPnL     = pnl;
-                        _state.HasPosition  = hasPos;
-                        _state.LastCycle    = DateTime.UtcNow;
-
-                        if (!_state.IsRunning)
-                            _state.LastAction = "Bot paused via API";
-                        else if (_state.Settings.MaxTradesPerDay > 0 && _state.TradesToday >= _state.Settings.MaxTradesPerDay)
-                            _state.LastAction = $"Daily limit reached ({_state.TradesToday}/{_state.Settings.MaxTradesPerDay})";
-                        else
-                            _state.LastAction = "Outside trading hours";
+                        // Explicitly stopped via API: hands off — only refresh status, never auto-close.
+                        var (pnl, hasPos) = await engine.GetPositionStatusAsync(price);
+                        _state.FloatPnL    = pnl;
+                        _state.HasPosition = hasPos;
+                        _state.LastAction  = "Bot paused via API";
                     }
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -86,7 +91,8 @@ public class AccountBotRunner
                     _state.LastAction = $"Error: {ex.Message[..Math.Min(ex.Message.Length, 80)]}";
                 }
 
-                var interval = int.TryParse(Environment.GetEnvironmentVariable("BOT_INTERVAL_SECONDS"), out var s) ? s : 60;
+                // Loop speed is driven by the tunable CycleSeconds setting (live-editable via the API).
+                var interval = Math.Max(1, _state.Settings.CycleSeconds);
                 await Task.Delay(TimeSpan.FromSeconds(interval), ct);
             }
         }
